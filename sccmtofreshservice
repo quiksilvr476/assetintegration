@@ -1,0 +1,58 @@
+# Set global variables for FreshService
+$freshserviceAssetNamesList = New-Object "System.Collections.Generic.List[String]"
+$APIKey = 
+$EncodedCredentials = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(("{0}:{1}" -f $APIKey,$null)))
+$HTTPHeaders = @{}
+$HTTPHeaders.Add('Authorization', ("Basic {0}" -f $EncodedCredentials))
+$HTTPHeaders.Add('Content-Type', 'application/json')
+
+############GET All Freshservice Assets#############
+
+write-host 'retreiving assets from freshservice'
+
+$pageNumber = 1..200
+$cmdbURL = "https://yoursite.freshservice.com/cmdb/items.json?page="
+Do
+{
+foreach ($number in $pageNumber)
+    {
+    $cmdbURLpage = ($cmdbURL + $number)
+    $freshserviceGetResult = Invoke-RestMethod -Method Get -Uri $cmdbURLpage -Headers $HTTPHeaders
+    $freshserviceAssets += $freshserviceGetResult
+    }
+} Until ($freshserviceGetResult.Count = 0)
+
+write-host 'retreiving assets from freshservice succcessful'
+write-host @($freshserviceAssets).Count 'assets found'
+
+######Import SCCM CSV###########
+
+write-host 'importing sccm assets from CSV'
+$sccmPCs = Import-CSV C:\CSVpath.csv 
+write-host 'retreiving assets from sccm succcessful'
+write-host @($sccmPCs).Count 'assets found'
+
+#########Find assets that are not in Freshservice and add them to Freshservice#########
+
+foreach($asset in $freshserviceAssets) {
+    $freshserviceAssetNamesList.Add($asset.name)
+    }
+    
+foreach ($sccmPC in $sccmPCs) {
+    if ($freshserviceAssetNamesList -notcontains $sccmPC.hostname) {
+        $POSTObject = [pscustomobject]@{
+            cmdb_config_item = @{
+                name = $sccmPC.Hostname
+                ci_type_id = 4000118085
+                asset_state_400118079 = 1
+                state_name = $null
+                used_by = $sccmPC.User
+                level_field_attributes = @{asset_state_4000118079 = 'In Use'; product_4000118079 = $sccmPC.Model; mac_address_4000118085 = $sccmPC.MacAddress; os_400118085 = 'Windows'; os_version_400118085 = $sccmPC.OperatingSystem; hostname_4000118085 = $sccmPC.hostname}
+                }
+            }
+        $POSTJson = $POSTObject | ConvertTo-Json 
+        Invoke-RestMethod -Method Post -Uri $cmdbURL -Headers $HTTPHeaders -Body $POSTJson
+        }
+    }
+
+
